@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "id": "bert.wisps",
+  "name": "Wisps",
+  "version": "0.1.0",
+  "author": "bert",
+  "description": "Wisps that haunt your desktop while your coding agents work, and drift over to your cursor when one needs you",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Wisps.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Wisps",
+    "description": "Desktop wisps that mirror what your coding agents are doing",
+    "category": "Fun",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "enabled": true,
+      "size": "Medium",
+      "layer": "In front of windows",
+      "follow": true,
+      "glow": true,
+      "haunt": true,
+      "preview": "Off",
+      "corner": "Bottom right"
+    },
+    "schema": [
+      {
+        "key": "enabled",
+        "type": "boolean",
+        "label": "Show wisps",
+        "defaultValue": true
+      },
+      {
+        "key": "size",
+        "type": "enum",
+        "label": "Size",
+        "options": [
+          "Small",
+          "Medium",
+          "Large"
+        ],
+        "defaultValue": "Medium"
+      },
+      {
+        "key": "corner",
+        "type": "enum",
+        "label": "Where they perch",
+        "options": [
+          "Top left",
+          "Top middle",
+          "Top right",
+          "Bottom left",
+          "Bottom middle",
+          "Bottom right"
+        ],
+        "defaultValue": "Bottom right",
+        "description": "Wisps stay near this corner instead of drifting across the screen"
+      },
+      {
+        "key": "layer",
+        "type": "enum",
+        "label": "Layer",
+        "options": [
+          "In front of windows",
+          "On the desktop",
+          "Above everything"
+        ],
+        "defaultValue": "In front of windows"
+      },
+      {
+        "key": "follow",
+        "type": "boolean",
+        "label": "Come to the cursor when needed",
+        "description": "Drifts over to your pointer when the agent is waiting on you",
+        "defaultValue": true
+      },
+      {
+        "key": "glow",
+        "type": "boolean",
+        "label": "Glow",
+        "defaultValue": true
+      },
+      {
+        "key": "haunt",
+        "type": "boolean",
+        "label": "Linger when idle",
+        "description": "Keeps one dozing on screen between sessions",
+        "defaultValue": true
+      },
+      {
+        "key": "preview",
+        "type": "enum",
+        "label": "Preview a state",
+        "options": [
+          "Off",
+          "Dozing",
+          "Working",
+          "Needs you",
+          "Done",
+          "Trouble"
+        ],
+        "defaultValue": "Off",
+        "description": "Force a state to see how it looks, with no agent running"
+      }
+    ]
+  }
+}

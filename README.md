@@ -78,8 +78,14 @@ instead — centred, then alternating right and left.
 
 ## Setup
 
-The wisp learns what your agent is doing from Claude Code hooks. Add these to
-`~/.claude/settings.json` (paths assume the default plugin location):
+The wisp learns what your agent is doing from hooks. Claude Code and grok are
+both supported, and a wisp appears per session either way — run both at once
+and you get one of each.
+
+### Claude Code
+
+Add these to `~/.claude/settings.json` (paths assume the default plugin
+location):
 
 ```json
 {
@@ -96,6 +102,24 @@ The wisp learns what your agent is doing from Claude Code hooks. Add these to
 
 Use absolute paths rather than `~` if your shell doesn't expand them. Hooks are
 read when a session starts, so open a **new** terminal after adding them.
+
+### grok
+
+grok reads Claude-shaped hooks, so the same script drives it. Copy the bundled
+template into place:
+
+```sh
+mkdir -p ~/.grok/hooks
+cp ~/.config/omarchy/plugins/bert.wisps/hooks/grok-hooks.json ~/.grok/hooks/wisps.json
+```
+
+Two differences worth knowing. grok sends its payload in camelCase, which the
+hook script handles — it reads `sessionId` and `$GROK_SESSION_ID` as well as
+Claude's `session_id`. And grok labels its notifications, so the template
+matches on `permission_prompt` and the script trusts that label instead of the
+text filter described below. grok also has two events Claude lacks:
+`StopFailure` maps straight to `trouble`, and `StopCancelled` (an interrupt)
+returns the wisp to `idle`.
 
 Without hooks the wisp still works — it just dozes. Everything is driven by
 the state files, so any tool that writes them drives the wisp.
@@ -122,13 +146,20 @@ patterns can be checked against reality if it ever misfires.
 
 Closing a terminal with a window-kill (`super + w`) destroys the process
 outright, so `SessionEnd` never runs and nothing tells the wisp its session is
-gone. Each state file therefore records the pid of the claude process that owns
-it — a hook's own parent — and the poll drops any file whose process is no
-longer alive. A killed session's wisp disappears within a second.
+gone. Each state file therefore records the pid of the agent process that owns
+it, and the poll drops any file whose process is no longer alive. A killed
+session's wisp disappears within a second.
 
-The check reads `/proc/<pid>/comm` and requires exactly `claude`. Matching
-against the full command line instead gave false positives: any shell whose
-arguments merely mentioned a `~/.claude` path looked like a live session.
+Finding that pid is not simply `$PPID`: it is the hook's own parent under
+Claude Code, but grok runs hooks below a supervisor process. The script walks
+up `/proc` for the first ancestor named `claude` or `grok`, and if that finds
+nothing it falls back to grok's own live-session registry at
+`~/.grok/active_sessions.json`, which records a pid per session.
+
+The liveness check reads `/proc/<pid>/comm` and requires an exact match against
+the agent name recorded alongside the pid. Matching the full command line
+instead gave false positives: any shell whose arguments merely mentioned a
+`~/.claude` path looked like a live session.
 
 ### How "trouble" is detected
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "bert.wisps",
   "name": "Wisps",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "bert",
   "description": "Wisps that haunt your desktop while your coding agents work, and drift over to your cursor when one needs you",
   "kinds": [

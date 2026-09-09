@@ -1,0 +1,29 @@
+{
+  "_comment": "Copy to ~/.grok/hooks/wisps.json. If your grok build does not expand $HOME in a command, replace it with your absolute home path.",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "$HOME/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh idle" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "$HOME/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh working" } ] }
+    ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command", "command": "$HOME/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh busy" } ] }
+    ],
+    "Notification": [
+      { "matcher": "permission_prompt", "hooks": [ { "type": "command", "command": "$HOME/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh attention" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "$HOME/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh done" } ] }
+    ],
+    "StopFailure": [
+      { "hooks": [ { "type": "command", "command": "$HOME/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh trouble" } ] }
+    ],
+    "StopCancelled": [
+      { "hooks": [ { "type": "command", "command": "$HOME/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh idle" } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "$HOME/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh gone" } ] }
+    ]
+  }
+}

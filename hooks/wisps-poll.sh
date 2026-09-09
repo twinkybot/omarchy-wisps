@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Prints one line per live Claude Code session, for Wisps.qml to parse:
+# Prints one line per live coding-agent session, for Wisps.qml to parse:
 #
-#   <session_id>\t<state>\t<age_seconds>\t<cwd>
+#   <session_id>\t<state>\t<age_seconds>\t<cwd>\t<agent>
 #
 # Output is bounded in every direction -- a fixed session cap, a known-word
 # state, a clamped cwd -- because a long-lived shell process parses it.
@@ -34,6 +34,16 @@ for f in "$dir"/*.state; do
   # the only thing that reliably clears those. Files written by an older
   # version have no pid line; those fall back to the age check below.
   owner="$(sed -n 3p "$f" 2>/dev/null)"
+
+  # Line 4 names the agent that owns the session, so the liveness check knows
+  # which process name to expect. Files written before wisps learned about
+  # more than one agent have no line 4; those are claude.
+  agent="$(sed -n 4p "$f" 2>/dev/null)"
+  case "$agent" in
+    claude|grok) ;;
+    *) agent="claude" ;;
+  esac
+
   case "$owner" in
     ''|*[!0-9]*) 
       if [ "$age" -gt "$STALE_SECONDS" ]; then rm -f "$f" 2>/dev/null; fi
@@ -42,7 +52,7 @@ for f in "$dir"/*.state; do
       # /proc/<pid>/comm is the process name alone. Matching the full cmdline
       # instead gave false positives: any shell whose command line merely
       # mentioned a ~/.claude path counted as a live session.
-      if [ "$(cat "/proc/$owner/comm" 2>/dev/null)" != "claude" ]; then
+      if [ "$(cat "/proc/$owner/comm" 2>/dev/null)" != "$agent" ]; then
         rm -f "$f" 2>/dev/null
         continue
       fi
@@ -63,6 +73,6 @@ for f in "$dir"/*.state; do
   cwd="$(sed -n 2p "$f" 2>/dev/null | tr -d '\000-\037<>')"
   cwd="${cwd:0:160}"
 
-  printf '%s\t%s\t%s\t%s\n' "$sid" "$state" "$age" "$cwd"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$sid" "$state" "$age" "$cwd" "$agent"
   count=$(( count + 1 ))
 done

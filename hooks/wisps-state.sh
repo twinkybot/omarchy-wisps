@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Records what a Claude Code session is currently doing, for the Wisp plugin.
+# Records what a coding-agent session is currently doing, for the Wisp plugin.
 #
-# Wired up as hooks in ~/.claude/settings.json; each event calls this with the
-# state it represents. The hook payload arrives on stdin as JSON, and all we
+# Wired up as hooks in ~/.claude/settings.json and ~/.grok/hooks/wisps.json;
+# each event calls this with the state it represents. The two harnesses send
+# the same events with the same shape -- only the key style differs (claude's
+# session_id vs grok's sessionId) -- so one script serves both. The hook payload arrives on stdin as JSON, and all we
 # want from it is a few string fields, so we match them with bash's own regex
 # rather than forking sed or taking a dependency on jq -- this runs on every
 # tool call, so it has to be cheap.
@@ -11,7 +13,7 @@
 # nothing accumulates on disk:
 #
 #   $XDG_RUNTIME_DIR/bert-wisps/<session_id>.state
-#   line 1: state   line 2: cwd   line 3: owning claude pid
+#   line 1: state   line 2: cwd   line 3: owning agent pid   line 4: agent
 #
 # Never fails the hook: any problem here should be invisible to the session,
 # and PreToolUse in particular can block a tool if a hook exits non-zero.
@@ -44,6 +46,9 @@ sanitize() {
 }
 
 field session_id; sid="$_f"
+# grok sends the same payload in camelCase, and also exports the id directly.
+[ -n "$sid" ] || { field sessionId; sid="$_f"; }
+[ -n "$sid" ] || sid="${GROK_SESSION_ID:-}"
 [ -n "$sid" ] || sid="default"
 
 # Session ids are uuids. Anything else is refused outright rather than cleaned,
@@ -81,6 +86,15 @@ fi
 # worth flying the wisp over to your cursor; treating the nudge as "needs you"
 # is what made it hover at the pointer long after the work was finished.
 if [ "$state" = "attention" ]; then
+  # grok labels the two cases outright, so when it tells us, believe it and
+  # skip the text matching entirely: only a waiting permission prompt is a
+  # genuine "needs you", and idle_prompt fires at every turn end.
+  field notificationType
+  case "$_f" in
+    permission_prompt) ;;
+    ?*) exit 0 ;;
+  esac
+
   field message; msg="$(sanitize "$_f")"
   # Keep the last one so the filter below can be calibrated against real text
   # rather than guessed at. Runtime dir, single file, overwritten every time.
@@ -126,9 +140,52 @@ fi
 field cwd; cwd="$(sanitize "$_f")"
 [ -n "$cwd" ] || cwd="${PWD:-}"
 
-# Line 3 is the pid of the claude process that owns this session -- a hook's
-# own parent. Killing a terminal outright (super+w) never runs SessionEnd, so
+# Line 3 is the pid of the agent process that owns this session, and line 4
+# names it. Killing a terminal outright (super+w) never runs SessionEnd, so
 # without a liveness handle the state file, and its wisp, would linger for
 # hours after the session died. Rewritten on every event, so it self-heals.
-write_lines "$file" "$state" "$cwd" "$PPID"
+#
+# The hook's own parent is the agent under claude, but not always elsewhere --
+# grok runs hooks below a node supervisor -- so walk up the tree for the first
+# ancestor we recognise rather than assuming $PPID. Falling back to $PPID and
+# "claude" keeps the old behaviour when the walk finds nothing.
+owner="$PPID"
+agent="claude"
+pid="$PPID"
+for _ in 1 2 3 4 5 6; do
+  [ -n "$pid" ] && [ "$pid" != "0" ] && [ "$pid" != "1" ] || break
+  comm="$(cat "/proc/$pid/comm" 2>/dev/null)" || break
+  case "$comm" in
+    claude|grok) owner="$pid"; agent="$comm"; break ;;
+  esac
+  # Field 4 of /proc/<pid>/stat is the parent pid. The command name in field 2
+  # can itself contain spaces and parentheses, so cut everything up to the
+  # last ')' before splitting.
+  stat_line="$(cat "/proc/$pid/stat" 2>/dev/null)" || break
+  pid="$(printf '%s' "${stat_line##*) }" | cut -d' ' -f2)"
+  case "$pid" in ''|*[!0-9]*) break ;; esac
+done
+
+# If the walk found nothing and grok is clearly the caller, take grok at its
+# word: it keeps a live-session registry of its own, and the pid recorded
+# there is the process the poller wants to watch. Only reached on the fallback
+# path, so the common case never pays for this.
+if [ "$agent" = "claude" ] && [ -n "${GROK_SESSION_ID:-}${GROK_HOOK_EVENT:-}" ]; then
+  agent="grok"
+  reg="${HOME:-}/.grok/active_sessions.json"
+  if [ -f "$reg" ] && [ ! -L "$reg" ]; then
+    # One "pid": <n> from the object that carries our session id. tr puts each
+    # field on its own line so a plain grep can pick them out without jq.
+    found="$(tr ',{}' '\n\n\n' < "$reg" 2>/dev/null \
+      | grep -A6 -F "\"$sid\"" 2>/dev/null \
+      | sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' \
+      | head -n1)"
+    case "$found" in
+      ''|*[!0-9]*) ;;
+      *) owner="$found" ;;
+    esac
+  fi
+fi
+
+write_lines "$file" "$state" "$cwd" "$owner" "$agent"
 exit 0

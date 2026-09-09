@@ -207,10 +207,18 @@ are no frames to redraw. The wobble is the point rather than a mistake.
   session is actually waiting on you. The overlay never claims pointer input,
   so it can't see your clicks or what you type.
 - Session state lives in `$XDG_RUNTIME_DIR/bert-wisps/`, one small file per
-  session holding a single word, a working directory, and the process id of
-  the session that owns it. It is a runtime
+  session holding a single word, a working directory, the process id of the
+  session that owns it, and which agent that is. It is a runtime
   directory, so it is wiped when you log out. Stale files are cleaned up
   after 8 hours.
+- Reads `/proc/<pid>/comm` and `/proc/<pid>/stat` for the agent process that
+  owns a session and its ancestors, to find which process to watch and to
+  notice when a session dies without saying so. Only the process name and
+  parent pid are used.
+- Under grok only, and only when the walk above finds nothing, it reads
+  `~/.grok/active_sessions.json` — grok's own registry of live sessions — for
+  the process id of the current session. The read is byte-capped and refuses
+  symlinks, and nothing is written to that file.
 - On `Stop` it reads the tail of that session's own transcript to count failed
   tool calls. It counts them and nothing else — no content is stored, copied,
   or sent anywhere.

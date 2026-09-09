@@ -176,7 +176,9 @@ if [ "$agent" = "claude" ] && [ -n "${GROK_SESSION_ID:-}${GROK_HOOK_EVENT:-}" ];
   if [ -f "$reg" ] && [ ! -L "$reg" ]; then
     # One "pid": <n> from the object that carries our session id. tr puts each
     # field on its own line so a plain grep can pick them out without jq.
-    found="$(tr ',{}' '\n\n\n' < "$reg" 2>/dev/null \
+    # Byte-capped: the file belongs to grok, but a long-lived shell ends up
+    # parsing whatever this prints, so never read an unbounded amount of it.
+    found="$(head -c 65536 "$reg" 2>/dev/null | tr ',{}' '\n\n\n' \
       | grep -A6 -F "\"$sid\"" 2>/dev/null \
       | sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' \
       | head -n1)"

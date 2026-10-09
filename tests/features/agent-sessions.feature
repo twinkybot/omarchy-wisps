@@ -131,3 +131,68 @@ Feature: One wisp per coding-agent session
     And the payload is a notification of type "elicitation_dialog"
     When the "attention" hook runs
     Then the wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" is "attention" in "/home/me/proj"
+
+  # grok drives the same hooks through ~/.grok/hooks/wisps.json. It sends the
+  # session id in camelCase like Copilot and labels its notifications, but it
+  # runs hooks below a node supervisor, so tying a wisp to the process it
+  # belongs to takes the ancestry walk -- and failing that, a live-session
+  # registry grok keeps itself.
+
+  Scenario: A grok session is keyed by sessionId
+    Given a grok payload for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" in "/home/me/proj"
+    When the "working" hook runs
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is "working" in "/home/me/proj"
+
+  Scenario: A grok session whose payload carries no id falls back to the environment
+    Given a grok payload with no session id, in "/home/me/proj"
+    And the environment names session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31"
+    When the "working" hook runs
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is "working" in "/home/me/proj"
+
+  Scenario: A permission prompt grok is waiting on needs you
+    Given a grok payload for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" in "/home/me/proj"
+    And the "working" hook runs
+    And the payload is a notification of type "permission_prompt"
+    When the "attention" hook runs
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is "attention" in "/home/me/proj"
+
+  Scenario: The idle prompt grok fires at every turn end does not
+    Given a grok payload for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" in "/home/me/proj"
+    And the "working" hook runs
+    And the payload is a notification of type "idle_prompt"
+    When the "attention" hook runs
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is "working" in "/home/me/proj"
+
+  Scenario: The walk records grok itself, not the supervisor it runs hooks below
+    Given a grok payload for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" in "/home/me/proj"
+    When the "working" hook runs inside a running "grok" binary
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is owned by that binary, recorded as "grok"
+
+  Scenario: The walk finds grok by name even when its binary underneath is node
+    Given a grok payload for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" in "/home/me/proj"
+    When the "working" hook runs inside a "grok" link to a running "node" binary
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is owned by that binary, recorded as "grok"
+
+  Scenario: The walk finds grok by binary even when the process calls itself node
+    Given a grok payload for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" in "/home/me/proj"
+    When the "working" hook runs inside a "node" link to a running "grok" binary
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is owned by that binary, recorded as "grok"
+
+  Scenario: With no agent in the ancestry, grok's own registry names the owner
+    Given a grok payload with no session id, in "/home/me/proj"
+    And the environment names session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31"
+    And grok's registry records pid 4242 for that session
+    When the "working" hook runs out of reach of the ancestry walk
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is owned by pid 4242, recorded as "grok"
+
+  Scenario: The poller keeps a grok wisp whose owner is still running
+    Given a wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" owned by a running "grok" binary recorded as "grok"
+    When the poller runs
+    Then the poller lists session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31"
+    And the poller reports session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" as agent "grok"
+
+  Scenario: The poller drops a wisp whose owner is not the agent its file names
+    Given a wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" owned by a running "claude" binary recorded as "grok"
+    When the poller runs
+    Then the poller lists nothing
+    And there are 0 wisps

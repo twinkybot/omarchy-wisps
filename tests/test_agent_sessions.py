@@ -23,6 +23,29 @@ def copilot_payload(ctx, sid, cwd):
     ctx["payload"] = {"sessionId": sid, "timestamp": 1788765573888, "cwd": cwd}
 
 
+@given(parsers.parse('a grok payload for session "{sid}" in "{cwd}"'))
+def grok_payload(ctx, sid, cwd):
+    ctx["payload"] = {"sessionId": sid, "cwd": cwd}
+
+
+@given(parsers.parse('a grok payload with no session id, in "{cwd}"'))
+def grok_payload_without_id(ctx, cwd):
+    ctx["payload"] = {"cwd": cwd}
+
+
+@given(parsers.parse('the environment names session "{sid}"'))
+def env_names_session(ctx, sid):
+    ctx.setdefault("env", {})["GROK_SESSION_ID"] = sid
+
+
+@given(parsers.parse("grok's registry records pid {pid:d} for that session"))
+def grok_registry_records(ctx, grok_home, pid):
+    sid = ctx.get("env", {}).get("GROK_SESSION_ID") or ctx["payload"]["sessionId"]
+    (grok_home / "active_sessions.json").write_text(json.dumps(
+        {"sessions": [{"sessionId": sid, "cwd": "/home/me/proj", "pid": pid,
+                       "startedAt": 1788765573888}]}))
+
+
 @given("the payload carries an initialPrompt")
 def with_initial_prompt(ctx):
     ctx["payload"]["source"] = "new"
@@ -43,7 +66,11 @@ def as_permission_request(ctx, tool):
 @given(parsers.parse('the payload is a notification of type "{kind}"'))
 def as_notification(ctx, kind):
     text = {"agent_idle": 'Agent "spec-review" has finished processing and is now idle.',
-            "elicitation_dialog": "Welche der folgenden Zertifikate sind vorhanden?"}[kind]
+            "elicitation_dialog": "Welche der folgenden Zertifikate sind vorhanden?",
+            "permission_prompt": "grok wants to run: rg --files-with-matches TODO",
+            # Deliberately not one of the phrases the message filter also catches,
+            # so this pins the notificationType gate and nothing else.
+            "idle_prompt": "grok has finished this turn."}[kind]
     ctx["payload"].update({"message": text, "notificationType": kind, "title": kind})
 
 
@@ -58,7 +85,7 @@ def seconds_pass(runtime_dir, n):
 @given(parsers.parse('the "{state}" hook runs'))
 @when(parsers.parse('the "{state}" hook runs'))
 def hook_runs(ctx, runtime_dir, state):
-    result = run_hook(state, json.dumps(ctx["payload"]))
+    result = run_hook(state, json.dumps(ctx["payload"]), env=ctx.get("env"))
     assert result.returncode == 0, result.stderr
     assert result.stdout == "", "hooks must stay silent on stdout"
 
@@ -102,6 +129,36 @@ def hook_runs_inside_owner(ctx, runtime_dir, fake_binaries, state, via_shell=Fal
     raise AssertionError("hook did not write the state file")
 
 
+@given(parsers.parse('a wisp for session "{sid}" owned by a running "{name}" binary recorded as "{agent}"'))
+def wisp_owned_and_recorded(ctx, runtime_dir, fake_binaries, sid, name, agent):
+    ctx["owner"] = name
+    proc = fake_binaries(name)
+    _write_state(runtime_dir, sid, "working", "/home/me/proj", proc.pid, agent)
+
+
+@when(parsers.parse('the "{state}" hook runs inside a running "{name}" binary'))
+def hook_runs_inside_binary(ctx, runtime_dir, fake_binaries, state, name):
+    proc = fake_binaries(name, hook=(state, json.dumps(ctx["payload"])))
+    ctx["owner_pid"] = proc.pid
+    _wait_for_state(runtime_dir, ctx["payload"]["sessionId"], state)
+
+
+@when(parsers.parse('the "{state}" hook runs inside a "{link}" link to a running "{name}" binary'))
+def hook_runs_inside_linked_binary(ctx, runtime_dir, fake_binaries, state, link, name):
+    # comm takes the link's name, exe resolves to the real binary, so this
+    # pins the comm branch of the walk on its own.
+    proc = fake_binaries(name, hook=(state, json.dumps(ctx["payload"])), link=link)
+    ctx["owner_pid"] = proc.pid
+    _wait_for_state(runtime_dir, ctx["payload"]["sessionId"], state)
+
+
+@when(parsers.parse('the "{state}" hook runs out of reach of the ancestry walk'))
+def hook_runs_buried(ctx, runtime_dir, state):
+    result = run_hook(state, json.dumps(ctx["payload"]), env=ctx.get("env"), buried=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "", "hooks must stay silent on stdout"
+
+
 @when("the poller runs")
 def poller_runs(ctx):
     result = run_poll()
@@ -132,11 +189,42 @@ def poller_shows(ctx, sid, state):
     assert rows and rows[0][1] == state, ctx["poll"]
 
 
+@then(parsers.parse('the wisp for session "{sid}" is owned by that binary, recorded as "{agent}"'))
+def wisp_owned_by_that_binary(ctx, runtime_dir, sid, agent):
+    lines = (runtime_dir / f"{sid}.state").read_text().splitlines()
+    assert lines[2:4] == [str(ctx["owner_pid"]), agent], lines
+
+
+@then(parsers.parse('the wisp for session "{sid}" is owned by pid {pid:d}, recorded as "{agent}"'))
+def wisp_owned_by_pid(runtime_dir, sid, pid, agent):
+    lines = (runtime_dir / f"{sid}.state").read_text().splitlines()
+    assert lines[2:4] == [str(pid), agent], lines
+
+
+@then(parsers.parse('the poller reports session "{sid}" as agent "{agent}"'))
+def poller_reports_agent(ctx, sid, agent):
+    rows = [row for row in ctx["poll"] if row[0] == sid]
+    assert rows and rows[0][4] == agent, ctx["poll"]
+
+
 @then("the poller lists nothing")
 def poller_lists_nothing(ctx):
     assert ctx["poll"] == []
 
 
-def _write_state(runtime_dir, sid, state, cwd, pid):
+def _write_state(runtime_dir, sid, state, cwd, pid, agent=None):
     runtime_dir.mkdir(mode=0o700, exist_ok=True)
-    (runtime_dir / f"{sid}.state").write_text(f"{state}\n{cwd}\n{pid}\n")
+    # Line 4 is optional: files written before wisps knew more than one agent
+    # do not have it, and the poller has to cope with both.
+    body = f"{state}\n{cwd}\n{pid}\n" + (f"{agent}\n" if agent else "")
+    (runtime_dir / f"{sid}.state").write_text(body)
+
+
+def _wait_for_state(runtime_dir, sid, state):
+    import time
+    for _ in range(50):
+        f = runtime_dir / f"{sid}.state"
+        if f.exists() and f.read_text().startswith(state):
+            return
+        time.sleep(0.05)
+    raise AssertionError("hook did not write the state file")

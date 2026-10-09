@@ -108,6 +108,14 @@ esac
 if [ "$state" = "attention" ] && [[ $payload =~ \"hookName\"[[:space:]]*:[[:space:]]*\"permissionRequest\" ]]; then
   state="pending"
 fi
+# Copilot 1.0.83 pairs that request with a notification of type
+# "permission_prompt", granted or not: the same request wearing a second hat.
+# As attention it made the wisp fly to the cursor and the surface grow to the
+# screen on every single tool call, so it is "pending" too and the poller's
+# patience decides whether anyone is actually being asked.
+if [ "$state" = "attention" ] && [[ $payload =~ \"notificationType\"[[:space:]]*:[[:space:]]*\"permission_prompt\" ]]; then
+  state="pending"
+fi
 if [ "$state" = "attention" ]; then
   # grok and Copilot both label the two cases outright, so when they tell us,
   # believe it and skip the text matching entirely. Only a waiting permission

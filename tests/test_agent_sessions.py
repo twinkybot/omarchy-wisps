@@ -71,7 +71,7 @@ def as_permission_request(ctx, tool):
 def as_notification(ctx, kind):
     text = {"agent_idle": 'Agent "spec-review" has finished processing and is now idle.',
             "elicitation_dialog": "Welche der folgenden Zertifikate sind vorhanden?",
-            "permission_prompt": "grok wants to run: rg --files-with-matches TODO",
+            "permission_prompt": "Run command: python3 -m pytest tests -q",
             # Deliberately not one of the phrases the message filter also catches,
             # so this pins the notificationType gate and nothing else.
             "idle_prompt": "grok has finished this turn."}[kind]

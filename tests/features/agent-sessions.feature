@@ -84,6 +84,19 @@ Feature: One wisp per coding-agent session
     When the poller runs
     Then the poller shows session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" as "working"
 
+  # Copilot 1.0.83 pairs every permissionRequest with a notification of type
+  # "permission_prompt", granted or not -- 80 of them in one measured session,
+  # each answered by an allow rule within milliseconds. Wired to attention it
+  # made the wisp fly to the cursor and the surface grow to the screen on every
+  # tool call. It is the same request wearing a second hat, so it is "pending"
+  # too, and the poller's patience decides.
+  Scenario: A permission prompt notification is only a pending request
+    Given a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"
+    And the "working" hook runs
+    And the payload is a notification of type "permission_prompt"
+    When the "attention" hook runs
+    Then the wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" is "pending" in "/home/me/proj"
+
   Scenario: A permission left unanswered flies to your cursor
     Given a wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" owned by a running "copilot" binary
     And a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"
@@ -149,12 +162,12 @@ Feature: One wisp per coding-agent session
     When the "working" hook runs
     Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is "working" in "/home/me/proj"
 
-  Scenario: A permission prompt grok is waiting on needs you
+  Scenario: A permission prompt grok is waiting on waits for the poller's patience
     Given a grok payload for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" in "/home/me/proj"
     And the "working" hook runs
     And the payload is a notification of type "permission_prompt"
     When the "attention" hook runs
-    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is "attention" in "/home/me/proj"
+    Then the wisp for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" is "pending" in "/home/me/proj"
 
   Scenario: The idle prompt grok fires at every turn end does not
     Given a grok payload for session "3f2b1a44-7c5e-4d90-9a11-6b0e2f8c4d31" in "/home/me/proj"

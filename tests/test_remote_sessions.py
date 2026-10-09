@@ -39,6 +39,11 @@ def remote_list(runtime_dir, host, state, sid, cwd):
     (_remote_dir(runtime_dir) / f"{host}.list").write_text(f"{sid}\t{state}\t3\t{cwd}\n")
 
 
+@given(parsers.parse('the remote list for "{host}" holds a "{state}" session "{sid}" in "{cwd}" running "{agent}"'))
+def remote_list_with_agent(runtime_dir, host, state, sid, cwd, agent):
+    (_remote_dir(runtime_dir) / f"{host}.list").write_text(f"{sid}\t{state}\t3\t{cwd}\t{agent}\n")
+
+
 @given(parsers.parse("the remote list is {n:d} seconds old"))
 def remote_list_old(runtime_dir, n):
     for f in _remote_dir(runtime_dir).glob("*.list"):
@@ -95,7 +100,9 @@ def helper_runs(ctx, runtime_dir, helpers, host):
 
 
 @when("the poller runs")
-def poller_runs(ctx):
+def poller_runs(ctx, runtime_dir):
+    # runtime_dir is not read here, but requesting it is what redirects
+    # XDG_RUNTIME_DIR away from the real session directory.
     result = run_poll()
     assert result.returncode == 0, result.stderr
     ctx["poll"] = [line.split("\t") for line in result.stdout.splitlines()]
@@ -110,6 +117,12 @@ def remote_list_holds(runtime_dir, host, state, sid, cwd):
 def no_remote_list(ctx, runtime_dir, host):
     assert ctx["list_seen"], "the helper never wrote the list at all"
     assert not (runtime_dir / "remote" / f"{host}.list").exists()
+
+
+@then(parsers.parse('the poller reports session "{sid}" as agent "{agent}"'))
+def poller_reports_agent(ctx, sid, agent):
+    rows = [row for row in ctx["poll"] if row[0] == sid]
+    assert rows and len(rows[0]) > 4 and rows[0][4] == agent, ctx["poll"]
 
 
 @then(parsers.parse('the poller lists session "{sid}"'))

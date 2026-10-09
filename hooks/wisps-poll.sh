@@ -130,14 +130,20 @@ if [ -d "$rdir" ] && [ ! -L "$rdir" ]; then
     host="$(basename "$f" .list)"; host="${host%%.*}"
     case "$host" in *[!a-zA-Z0-9-]*|"") continue ;; esac
 
-    while IFS=$'\t' read -r sid state age cwd; do
+    while IFS=$'\t' read -r sid state age cwd agent; do
       [ "$count" -ge "$MAX_SESSIONS" ] && break
       case "$sid" in *[!a-zA-Z0-9._-]*|"") continue ;; esac
       case "$state" in idle|working|attention|done|trouble) ;; *) state="idle" ;; esac
       case "$age" in ''|*[!0-9]*) age=0 ;; esac
+      # The agent has to be read into its own field: left inside cwd, the tab
+      # before it is a control character, and the strip below would swallow it
+      # and glue the two columns together. A machine still running an older
+      # poller sends four columns and names no agent; those are claude's, as
+      # every session was before the column existed.
+      case "$agent" in claude|grok|copilot|opencode|qwen) ;; *) agent="claude" ;; esac
       cwd="$(printf '%s' "$cwd" | tr -d '\000-\037<>')"
       cwd="$host:${cwd:0:150}"
-      printf '%s\t%s\t%s\t%s\n' "$sid" "$state" "$age" "$cwd"
+      printf '%s\t%s\t%s\t%s\t%s\n' "$sid" "$state" "$age" "$cwd" "$agent"
       count=$(( count + 1 ))
     done < "$f"
   done

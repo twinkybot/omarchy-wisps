@@ -110,3 +110,35 @@ for f in "$dir"/*.state; do
   printf '%s\t%s\t%s\t%s\t%s\n' "$sid" "$state" "$age" "$cwd" "$agent"
   count=$(( count + 1 ))
 done
+
+# --- Sessions on other machines ---------------------------------------------
+# wisps-remote.sh streams a remote poller's output into remote/<host>.list,
+# rewriting it every second. A list older than REMOTE_STALE_SECONDS means the
+# stream has died; its sessions are dropped rather than shown frozen. Every
+# field is re-validated here: the file was written from another machine's
+# output, and the sanitiser above must apply to it just the same.
+REMOTE_STALE_SECONDS=5
+rdir="$dir/remote"
+if [ -d "$rdir" ] && [ ! -L "$rdir" ]; then
+  for f in "$rdir"/*.list; do
+    [ "$count" -ge "$MAX_SESSIONS" ] && break
+    [ -f "$f" ] || continue
+    [ -L "$f" ] && continue
+    mt="$(stat -c %Y "$f" 2>/dev/null)" || continue
+    [ $(( now - mt )) -le "$REMOTE_STALE_SECONDS" ] || continue
+
+    host="$(basename "$f" .list)"; host="${host%%.*}"
+    case "$host" in *[!a-zA-Z0-9-]*|"") continue ;; esac
+
+    while IFS=$'\t' read -r sid state age cwd; do
+      [ "$count" -ge "$MAX_SESSIONS" ] && break
+      case "$sid" in *[!a-zA-Z0-9._-]*|"") continue ;; esac
+      case "$state" in idle|working|attention|done|trouble) ;; *) state="idle" ;; esac
+      case "$age" in ''|*[!0-9]*) age=0 ;; esac
+      cwd="$(printf '%s' "$cwd" | tr -d '\000-\037<>')"
+      cwd="$host:${cwd:0:150}"
+      printf '%s\t%s\t%s\t%s\n' "$sid" "$state" "$age" "$cwd"
+      count=$(( count + 1 ))
+    done < "$f"
+  done
+fi

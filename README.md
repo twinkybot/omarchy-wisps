@@ -171,6 +171,28 @@ Copilot's `notification` hook names its kind: `elicitation_dialog` is the
 agent asking you something and flies the wisp over, `agent_idle` only reports
 a finished subagent and is ignored.
 
+### Agents on other machines
+
+An agent you start over ssh fires its hooks on the far side, so its wisp has
+to be mirrored back. On the remote machine put `wisps-state.sh`,
+`wisps-poll.sh` and `wisps-verdict.py` into `~/.local/bin/bert-wisps/` and
+wire `wisps-state.sh` into that machine's agent hooks exactly as above. On
+this machine keep one connection per host open:
+
+```
+mkdir -p ~/.config/systemd/user
+cp ~/.config/omarchy/plugins/bert.wisps/systemd/bert-wisps-remote@.service ~/.config/systemd/user/
+systemctl --user enable --now bert-wisps-remote@my-server.service
+```
+
+`wisps-remote.sh` streams the remote poller's output every second into
+`$XDG_RUNTIME_DIR/bert-wisps/remote/<host>.list`; the local poller merges it
+while the file is under five seconds old and shows the host in front of the
+directory, so the popup reads `my-server:/home/me/project`. Drop the
+connection and those wisps vanish within a few seconds. Liveness is checked
+on the remote side, where the pids mean something; the host must accept
+key-based logins, since `BatchMode=yes` never asks for a password.
+
 ### Tests
 
 The hook scripts are described by Gherkin scenarios in `tests/features/` and

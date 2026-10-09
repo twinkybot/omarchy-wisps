@@ -1,0 +1,16 @@
+# Keeps one ssh connection to %i open and mirrors its agent sessions into the
+# local wisps. Install with:
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/bert-wisps-remote@.service ~/.config/systemd/user/
+#   systemctl --user enable --now bert-wisps-remote@<ssh-host>.service
+[Unit]
+Description=Wisps: mirror coding-agent sessions from %i
+After=network-online.target
+
+[Service]
+ExecStart=%h/.config/omarchy/plugins/bert.wisps/hooks/wisps-remote.sh %i
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

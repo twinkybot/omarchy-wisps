@@ -120,14 +120,26 @@ def hook_runs_inside_owner_via_shell(ctx, runtime_dir, fake_binaries, state):
     hook_runs_inside_owner(ctx, runtime_dir, fake_binaries, state, via_shell=True)
 
 
+@given(parsers.parse('the "{state}" hook runs inside that binary, recording "{written}"'))
+def hook_runs_inside_owner_recording(ctx, runtime_dir, fake_binaries, state, written):
+    hook_runs_inside_owner(ctx, runtime_dir, fake_binaries, state, written=written)
+
+
+@given(parsers.parse('the wisp\'s file says "{state}"'))
+def file_says(runtime_dir, state):
+    for f in runtime_dir.glob("*.state"):
+        lines = f.read_text().splitlines()
+        f.write_text("\n".join([state] + lines[1:]) + "\n")
+
+
 @given(parsers.parse('the "{state}" hook runs inside that binary'))
-def hook_runs_inside_owner(ctx, runtime_dir, fake_binaries, state, via_shell=False):
+def hook_runs_inside_owner(ctx, runtime_dir, fake_binaries, state, via_shell=False, written=None):
     import time
     sid = ctx["payload"].get("sessionId") or ctx["payload"]["session_id"]
     fake_binaries(ctx["owner"], hook=(state, json.dumps(ctx["payload"])), via_shell=via_shell)
     for _ in range(50):
         f = runtime_dir / f"{sid}.state"
-        if f.exists() and f.read_text().startswith(state):
+        if f.exists() and f.read_text().startswith(written or state):
             return
         time.sleep(0.05)
     raise AssertionError("hook did not write the state file")

@@ -73,23 +73,22 @@ Feature: One wisp per coding-agent session
     Then the poller lists nothing
 
   # Copilot runs its permissionRequest hook on every tool call, granted or
-  # not -- 29 times in one measured session, almost all resolved within
-  # milliseconds by an allow-all setting. Only a request nobody answers is
-  # worth flying the wisp over, so "pending" ages into "attention".
+  # not, and its payload does not say which: 77 requests in one measured
+  # session under a permission policy, most waved through within
+  # milliseconds. Recorded as "pending" they made every granted tool that ran
+  # longer than two seconds look like an unanswered dialog, and the wisp
+  # jumped to the cursor in step with the test runs. So the request itself is
+  # ignored. What marks a real dialog is the notification of type
+  # "permission_prompt" that Copilot 1.0.83 sends only when one is on screen:
+  # 16 of those 77, and exactly those 16 waited for the user.
 
-  Scenario: A permission granted at once never counts as needing you
-    Given a wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" owned by a running "copilot" binary
-    And a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"
-    And the "pending" hook runs inside that binary
-    When the poller runs
-    Then the poller shows session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" as "working"
+  Scenario: A permission request Copilot grants itself leaves the wisp alone
+    Given a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"
+    And the "working" hook runs
+    And the payload is a permissionRequest for "bash"
+    When the "pending" hook runs
+    Then the wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" is "working" in "/home/me/proj"
 
-  # Copilot 1.0.83 pairs every permissionRequest with a notification of type
-  # "permission_prompt", granted or not -- 80 of them in one measured session,
-  # each answered by an allow rule within milliseconds. Wired to attention it
-  # made the wisp fly to the cursor and the surface grow to the screen on every
-  # tool call. It is the same request wearing a second hat, so it is "pending"
-  # too, and the poller's patience decides.
   Scenario: A permission prompt notification is only a pending request
     Given a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"
     And the "working" hook runs
@@ -97,11 +96,47 @@ Feature: One wisp per coding-agent session
     When the "attention" hook runs
     Then the wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" is "pending" in "/home/me/proj"
 
-  Scenario: A permission left unanswered flies to your cursor
+  Scenario: A permission prompt answered at once never counts as needing you
     Given a wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" owned by a running "copilot" binary
     And a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"
-    And the "pending" hook runs inside that binary
+    And the payload is a notification of type "permission_prompt"
+    And the "attention" hook runs inside that binary, recording "pending"
+    When the poller runs
+    Then the poller shows session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" as "working"
+
+  Scenario: A permission prompt left unanswered flies to your cursor
+    Given a wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" owned by a running "copilot" binary
+    And a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"
+    And the payload is a notification of type "permission_prompt"
+    And the "attention" hook runs inside that binary, recording "pending"
     And 3 seconds pass
+    When the poller runs
+    Then the poller shows session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" as "attention"
+
+  # Claude Code re-keys a session now and then: around a fork the transcript
+  # went on under a new session_id, the hooks followed it, and the old file
+  # sat at "attention" with a live owner pid until someone deleted it by hand.
+  # Nothing writes such a file ever again, so after five untouched minutes a
+  # question is treated as never seen and the wisp dozes instead of chasing
+  # the cursor for the rest of the day.
+  Scenario: A question nobody has touched for five minutes is not a question any more
+    Given a wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" owned by a running "copilot" binary
+    And the wisp's file says "attention"
+    And 301 seconds pass
+    When the poller runs
+    Then the poller shows session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" as "idle"
+
+  Scenario: A pending permission nobody has touched for five minutes dozes too
+    Given a wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" owned by a running "copilot" binary
+    And the wisp's file says "pending"
+    And 301 seconds pass
+    When the poller runs
+    Then the poller shows session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" as "idle"
+
+  Scenario: A question a minute old still needs you
+    Given a wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" owned by a running "copilot" binary
+    And the wisp's file says "attention"
+    And 60 seconds pass
     When the poller runs
     Then the poller shows session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" as "attention"
 
@@ -124,12 +159,12 @@ Feature: One wisp per coding-agent session
     When the "done" hook runs
     Then there are 0 wisps
 
-  Scenario: A permission request wired to attention is still only pending
+  Scenario: A permission request wired to attention leaves the wisp alone as well
     Given a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"
     And the "working" hook runs
     And the payload is a permissionRequest for "bash"
     When the "attention" hook runs
-    Then the wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" is "pending" in "/home/me/proj"
+    Then the wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" is "working" in "/home/me/proj"
 
   Scenario: A subagent going idle is news, not a question for you
     Given a Copilot CLI payload for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" in "/home/me/proj"

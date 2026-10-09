@@ -17,6 +17,7 @@ now="$(date +%s)"
 MAX_SESSIONS=12
 STALE_SECONDS=28800        # 8h backstop for files with no pid recorded
 PENDING_SECONDS=2          # a permission request unanswered this long needs you
+ORPHAN_SECONDS=300         # a question untouched this long was never seen by its session
 count=0
 
 for f in "$dir"/*.state; do
@@ -86,11 +87,20 @@ for f in "$dir"/*.state; do
   state="$(sed -n 1p "$f" 2>/dev/null)"
   # A known word or nothing: the wisp's whole state machine keys off this.
   case "$state" in
-    idle|working|attention|done|trouble) ;;
-    pending)
+    idle|working|done|trouble) ;;
+    attention|pending)
+      # A question nobody has answered for minutes is not a question any more.
+      # Claude Code re-keys a session now and then (measured around a fork:
+      # the transcript continued under a new session_id at 17:16, the hooks
+      # followed it, and the old file sat at "attention" with a live owner
+      # pid for good). Nothing will ever write that file again, so the wisp
+      # must not chase the cursor on its behalf; it dozes instead.
+      if [ "$age" -ge "$ORPHAN_SECONDS" ]; then state="idle"
       # Granted permissions clear within milliseconds; one still pending after
       # PENDING_SECONDS is a dialog waiting on you.
-      if [ "$age" -ge "$PENDING_SECONDS" ]; then state="attention"; else state="working"; fi ;;
+      elif [ "$state" = "pending" ]; then
+        if [ "$age" -ge "$PENDING_SECONDS" ]; then state="attention"; else state="working"; fi
+      fi ;;
     *) state="idle" ;;
   esac
 

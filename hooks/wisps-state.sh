@@ -102,17 +102,22 @@ esac
 # worth flying the wisp over to your cursor; treating the nudge as "needs you"
 # is what made it hover at the pointer long after the work was finished.
 #
-# Copilot's permissionRequest carries "hookName":"permissionRequest" and fires
-# on every tool call, granted or not (see "pending" below). Wired to attention
-# it would park the wisp at the cursor for the whole turn, so it is demoted.
-if [ "$state" = "attention" ] && [[ $payload =~ \"hookName\"[[:space:]]*:[[:space:]]*\"permissionRequest\" ]]; then
-  state="pending"
+# Copilot's permissionRequest fires on every tool call, granted or not, and
+# its payload does not say which. What does say so is the notification that
+# follows only when a dialog is really on screen: notificationType
+# "permission_prompt". Measured on Copilot CLI 1.0.83: 77 requests in one
+# session, 16 with that notification, and exactly those 16 waited for the
+# user (83 s, 57 s, 4.5 s, 2.3 s); the granted ones ran on within
+# milliseconds. So the request itself is ignored whatever it was wired to,
+# and the notification becomes "pending" -- wisps-poll.sh reports it as
+# attention once it has sat unanswered for a couple of seconds, and the next
+# tool event clears it.
+#
+# Claude Code and Qwen Code raise PermissionRequest only for a real dialog,
+# and they do not send hookName, so their "pending" still lands.
+if [[ $payload =~ \"hookName\"[[:space:]]*:[[:space:]]*\"permissionRequest\" ]]; then
+  case "$state" in pending|attention) exit 0 ;; esac
 fi
-# Copilot 1.0.83 pairs that request with a notification of type
-# "permission_prompt", granted or not: the same request wearing a second hat.
-# As attention it made the wisp fly to the cursor and the surface grow to the
-# screen on every single tool call, so it is "pending" too and the poller's
-# patience decides whether anyone is actually being asked.
 if [ "$state" = "attention" ] && [[ $payload =~ \"notificationType\"[[:space:]]*:[[:space:]]*\"permission_prompt\" ]]; then
   state="pending"
 fi
@@ -159,12 +164,10 @@ if [ "$state" = "busy" ]; then
   fi
 fi
 
-# --- "pending" is a permission request that may already be granted ----------
-# Copilot runs its permissionRequest hook on every tool call, whether a dialog
-# appears or an allow-all setting waves it through a few milliseconds later.
-# So the file records "pending" and wisps-poll.sh only reports it as attention
-# once it has sat unanswered for a couple of seconds; the postToolUse hook
-# ("busy") clears it as soon as the tool has run.
+# --- "pending" is a dialog that may be answered any moment ------------------
+# The file records "pending" and wisps-poll.sh only reports it as attention
+# once it has sat unanswered for a couple of seconds; the next tool hook
+# ("busy") clears it as soon as the agent moves on.
 
 # --- "done" is provisional --------------------------------------------------
 # The Stop hook knows the agent stopped but not how it went, and PostToolUse

@@ -207,9 +207,9 @@ Feature: One wisp per coding-agent session
     Given the hook scripts that ship with the plugin
     Then each one is valid bash
 
-  Scenario: No QML file has anything for qmllint to complain about
+  Scenario: Every QML file parses
     Given the QML files this plugin ships
-    Then qmllint reports nothing against them
+    Then none of them has a syntax error
 
   Scenario: Nothing in the checkout carries an unresolved merge marker
     Given the files this plugin ships

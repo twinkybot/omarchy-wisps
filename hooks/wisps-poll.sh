@@ -16,6 +16,7 @@ dir="${XDG_RUNTIME_DIR:-/tmp}/bert-wisps"
 now="$(date +%s)"
 MAX_SESSIONS=12
 STALE_SECONDS=28800        # 8h backstop for files with no pid recorded
+PENDING_SECONDS=2          # a permission request unanswered this long needs you
 count=0
 
 for f in "$dir"/*.state; do
@@ -37,11 +38,12 @@ for f in "$dir"/*.state; do
 
   # Line 4 names the agent that owns the session, so the liveness check knows
   # which process name to expect. Files written before wisps learned about
-  # more than one agent have no line 4; those are claude.
+  # more than one agent have no line 4; those are reported as claude, and any
+  # agent we know counts as a live owner for them, since the file cannot say.
   agent="$(sed -n 4p "$f" 2>/dev/null)"
   case "$agent" in
-    claude|grok) ;;
-    *) agent="claude" ;;
+    claude|grok|copilot) expect="$agent" ;;
+    *) agent="claude"; expect="" ;;
   esac
 
   case "$owner" in
@@ -49,12 +51,30 @@ for f in "$dir"/*.state; do
       if [ "$age" -gt "$STALE_SECONDS" ]; then rm -f "$f" 2>/dev/null; fi
       ;;
     *)
-      # /proc/<pid>/comm is the process name alone. Matching the full cmdline
-      # instead gave false positives: any shell whose command line merely
-      # mentioned a ~/.claude path counted as a live session.
-      if [ "$(cat "/proc/$owner/comm" 2>/dev/null)" != "$agent" ]; then
-        rm -f "$f" 2>/dev/null
-        continue
+      # Match the process against the agent that wrote the file. Either the
+      # process name or the binary name may carry it, and neither alone is
+      # enough: Copilot CLI names its main thread "MainThread", so only
+      # /proc/<pid>/exe says "copilot", while Claude's native installer runs a
+      # binary named after its version, e.g. .../claude/versions/2.1.263, so
+      # only comm says "claude". The full cmdline is never consulted: any
+      # shell whose command line merely mentioned a ~/.claude path used to
+      # count as a live session.
+      comm="$(cat "/proc/$owner/comm" 2>/dev/null)"
+      exe="$(readlink "/proc/$owner/exe" 2>/dev/null)"
+      exe="${exe% (deleted)}"; exe="${exe##*/}"
+      if [ -n "$expect" ]; then
+        if [ "$comm" != "$expect" ] && [ "$exe" != "$expect" ]; then
+          rm -f "$f" 2>/dev/null
+          continue
+        fi
+      else
+        case "$comm" in
+          claude|grok|copilot) ;;
+          *) case "$exe" in
+               claude|grok|copilot) ;;
+               *) rm -f "$f" 2>/dev/null; continue ;;
+             esac ;;
+        esac
       fi
       ;;
   esac
@@ -67,6 +87,10 @@ for f in "$dir"/*.state; do
   # A known word or nothing: the wisp's whole state machine keys off this.
   case "$state" in
     idle|working|attention|done|trouble) ;;
+    pending)
+      # Granted permissions clear within milliseconds; one still pending after
+      # PENDING_SECONDS is a dialog waiting on you.
+      if [ "$age" -ge "$PENDING_SECONDS" ]; then state="attention"; else state="working"; fi ;;
     *) state="idle" ;;
   esac
 

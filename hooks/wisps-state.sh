@@ -45,8 +45,9 @@ sanitize() {
   printf '%s' "${s:0:256}"
 }
 
+# Claude Code sends session_id; grok and GitHub Copilot CLI both send it in
+# camelCase, and grok also exports the id directly.
 field session_id; sid="$_f"
-# grok sends the same payload in camelCase, and also exports the id directly.
 [ -n "$sid" ] || { field sessionId; sid="$_f"; }
 [ -n "$sid" ] || sid="${GROK_SESSION_ID:-}"
 [ -n "$sid" ] || sid="default"
@@ -58,6 +59,13 @@ case "$sid" in
 esac
 
 file="$dir/$sid.state"
+
+# Copilot's one-shot mode (copilot -p) fires userPromptSubmitted before
+# sessionStart, so a plain "idle" here would overwrite "working" while the
+# agent is already running. A start that carries the prompt is a working one.
+if [ "$state" = "idle" ] && [[ $payload =~ \"initial(P|_p)rompt\"[[:space:]]*:[[:space:]]*\" ]]; then
+  state="working"
+fi
 
 # The runtime dir must be a real directory we own, never a symlink pointing
 # somewhere else.
@@ -80,18 +88,35 @@ if [ "$state" = "gone" ]; then
   exit 0
 fi
 
+# A verdict or a wait can only belong to a session that exists. Copilot fires
+# agentStop for a finished subagent under the subagent's own sessionId; without
+# this guard every subagent leaves a phantom wisp behind.
+case "$state" in
+  busy|pending|attention|done|trouble)
+    { [ -f "$file" ] && [ ! -L "$file" ]; } || exit 0 ;;
+esac
+
 # --- Notification is two different events wearing one name ------------------
 # It fires both when the agent genuinely needs a decision from you, and as a
 # plain nudge when the prompt has simply been sitting idle. Only the first is
 # worth flying the wisp over to your cursor; treating the nudge as "needs you"
 # is what made it hover at the pointer long after the work was finished.
+#
+# Copilot's permissionRequest carries "hookName":"permissionRequest" and fires
+# on every tool call, granted or not (see "pending" below). Wired to attention
+# it would park the wisp at the cursor for the whole turn, so it is demoted.
+if [ "$state" = "attention" ] && [[ $payload =~ \"hookName\"[[:space:]]*:[[:space:]]*\"permissionRequest\" ]]; then
+  state="pending"
+fi
 if [ "$state" = "attention" ]; then
-  # grok labels the two cases outright, so when it tells us, believe it and
-  # skip the text matching entirely: only a waiting permission prompt is a
-  # genuine "needs you", and idle_prompt fires at every turn end.
+  # grok and Copilot both label the two cases outright, so when they tell us,
+  # believe it and skip the text matching entirely. Only a waiting permission
+  # prompt (grok) or a question dialog (Copilot's elicitation_dialog) is a
+  # genuine "needs you"; grok's idle_prompt fires at every turn end, and
+  # Copilot's agent_idle only says a subagent has finished.
   field notificationType
   case "$_f" in
-    permission_prompt) ;;
+    permission_prompt|elicitation_dialog) ;;
     ?*) exit 0 ;;
   esac
 
@@ -113,14 +138,25 @@ fi
 # It is deliberately weaker than "working": it ONLY rescues the attention
 # state. It must not touch done/trouble (a terminal verdict the wisp is still
 # playing), and it must not rewrite the file on every single tool call.
+#
+# Copilot's ask_user tool is the agent asking you a question in the terminal,
+# so a tool starting can also mean the opposite: that one needs you now.
 if [ "$state" = "busy" ]; then
-  prev=""
-  if [ -f "$file" ] && [ ! -L "$file" ]; then
+  if [[ $payload =~ \"name\"[[:space:]]*:[[:space:]]*\"ask_user\" ]]; then
+    state="attention"
+  else
+    prev=""
     read -r prev < "$file" 2>/dev/null || prev=""
+    case "$prev" in attention|pending) state="working" ;; *) exit 0 ;; esac
   fi
-  [ "$prev" = "attention" ] || exit 0
-  state="working"
 fi
+
+# --- "pending" is a permission request that may already be granted ----------
+# Copilot runs its permissionRequest hook on every tool call, whether a dialog
+# appears or an allow-all setting waves it through a few milliseconds later.
+# So the file records "pending" and wisps-poll.sh only reports it as attention
+# once it has sat unanswered for a couple of seconds; the postToolUse hook
+# ("busy") clears it as soon as the tool has run.
 
 # --- "done" is provisional --------------------------------------------------
 # The Stop hook knows the agent stopped but not how it went, and PostToolUse
@@ -155,8 +191,15 @@ pid="$PPID"
 for _ in 1 2 3 4 5 6; do
   [ -n "$pid" ] && [ "$pid" != "0" ] && [ "$pid" != "1" ] || break
   comm="$(cat "/proc/$pid/comm" 2>/dev/null)" || break
+  # comm alone is not enough: Copilot CLI names its main thread "MainThread",
+  # so only /proc/<pid>/exe says "copilot". wisps-poll.sh checks the same two
+  # in the same order, so whatever is recorded here is what it looks for.
+  exe="$(readlink "/proc/$pid/exe" 2>/dev/null)"; exe="${exe% (deleted)}"
   case "$comm" in
-    claude|grok) owner="$pid"; agent="$comm"; break ;;
+    claude|grok|copilot) owner="$pid"; agent="$comm"; break ;;
+  esac
+  case "${exe##*/}" in
+    claude|grok|copilot) owner="$pid"; agent="${exe##*/}"; break ;;
   esac
   # Field 4 of /proc/<pid>/stat is the parent pid. The command name in field 2
   # can itself contain spaces and parentheses, so cut everything up to the

@@ -124,6 +124,63 @@ returns the wisp to `idle`.
 Without hooks the wisp still works — it just dozes. Everything is driven by
 the state files, so any tool that writes them drives the wisp.
 
+### GitHub Copilot CLI
+
+Copilot CLI has the same hooks under other names. Drop this into
+`~/.copilot/hooks/wisps.json` (the directory may not exist yet) and start a new
+session:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart":        [{ "type": "command", "bash": "~/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh idle",      "timeoutSec": 5 }],
+    "userPromptSubmitted": [{ "type": "command", "bash": "~/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh working",   "timeoutSec": 5 }],
+    "preToolUse":          [{ "type": "command", "bash": "~/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh busy",      "timeoutSec": 5 }],
+    "postToolUse":         [{ "type": "command", "bash": "~/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh busy",      "timeoutSec": 5 }],
+    "permissionRequest":   [{ "type": "command", "bash": "~/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh pending",   "timeoutSec": 5 }],
+    "notification":        [{ "type": "command", "bash": "~/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh attention", "timeoutSec": 5 }],
+    "agentStop":           [{ "type": "command", "bash": "~/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh done",      "timeoutSec": 5 }],
+    "sessionEnd":          [{ "type": "command", "bash": "~/.config/omarchy/plugins/bert.wisps/hooks/wisps-state.sh gone",      "timeoutSec": 5 }]
+  }
+}
+```
+
+Copilot's `preToolUse` is fail-closed: a hook that exits non-zero denies the
+tool call. `wisps-state.sh` never exits non-zero and never writes to stdout, so
+it is safe there and leaves the permission dialog untouched. Copilot sessions
+show up as their own wisps -- the state script accepts `sessionId` as well as
+`session_id`, and the poller recognises a live owner by its binary name
+(`claude` or `copilot`) rather than by process name -- Copilot calls its main
+thread `MainThread`.
+
+Three Copilot habits differ from Claude Code and are handled in the scripts:
+
+- **`permissionRequest` fires on every tool call**, granted or not. In one
+  measured session it ran 29 times, nearly all waved through within
+  milliseconds by an allow-all setting, while real dialogs waited 3–64 s. So
+  it records `pending`, which the poller reports as attention only after it
+  has sat unanswered for two seconds; `postToolUse` clears it.
+- **`ask_user`** is the agent asking you a question in the terminal. A
+  `preToolUse` for it is attention right away.
+- **A finished subagent fires `agentStop` under its own `sessionId`.** A
+  verdict for a session that never started is ignored, so subagents leave no
+  phantom wisps.
+
+Copilot's `notification` hook names its kind: `elicitation_dialog` is the
+agent asking you something and flies the wisp over, `agent_idle` only reports
+a finished subagent and is ignored.
+
+### Tests
+
+The hook scripts are described by Gherkin scenarios in `tests/features/` and
+run with [pytest-bdd](https://pytest-bdd.readthedocs.io/). No agent is
+started: the "owning process" is a renamed copy of `sleep`.
+
+```
+uv run --with pytest-bdd pytest tests
+```
+
 ### Why the wisp stops hovering
 
 `Notification` is two different events wearing one name: the agent genuinely

@@ -196,3 +196,25 @@ Feature: One wisp per coding-agent session
     When the poller runs
     Then the poller lists nothing
     And there are 0 wisps
+
+  # These two are not about behaviour, they are about the checkout being live.
+  # Wisps.qml resolves the hooks relative to this directory, so anything half
+  # finished in the working tree is what the desktop runs -- a rebase left
+  # conflict markers in both scripts once, and the overlay went dark until
+  # someone noticed. Two cheap guards against the same afternoon.
+
+  Scenario: Every hook script parses
+    Given the hook scripts that ship with the plugin
+    Then each one is valid bash
+
+  Scenario: No QML file has anything for qmllint to complain about
+    Given the QML files this plugin ships
+    Then qmllint reports nothing against them
+
+  Scenario: Nothing in the checkout carries an unresolved merge marker
+    Given the files this plugin ships
+    Then none of them carries an unresolved merge marker
+
+  Scenario: With no sessions at all the poller succeeds and stays silent
+    When the poller runs
+    Then the poller lists nothing

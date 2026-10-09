@@ -17,7 +17,8 @@ import subprocess
 
 import pytest
 
-HOOKS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HOOKS = os.path.join(ROOT, "hooks")
 
 
 @pytest.fixture

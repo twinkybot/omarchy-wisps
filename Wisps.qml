@@ -145,6 +145,15 @@ Item {
   Component.onCompleted: syncWisps()
 
   // --- polling the session dir -----------------------------------------
+  // A poll reads a handful of small files and is gone in milliseconds. One
+  // still running after this long is not slow, it is wedged -- and because
+  // the timer below only starts a poll once the last one has finished, a
+  // single wedged poll stops the overlay forever. That is not theoretical:
+  // a hook script left with conflict markers did it, and the wisps stayed
+  // gone until the shell was restarted by hand.
+  readonly property int pollStuckMs: 5000
+  property real pollStartedAt: 0
+
   Process {
     id: pollProc
     command: ["/usr/bin/env", "bash", root.pollScript.toString().replace("file://", "")]
@@ -171,7 +180,15 @@ Item {
     repeat: true
     running: root.showWisps && root.previewState === "Off"
     triggeredOnStart: true
-    onTriggered: if (!pollProc.running) pollProc.running = true
+    onTriggered: {
+      if (!pollProc.running) {
+        root.pollStartedAt = Date.now()
+        pollProc.running = true
+      } else if (Date.now() - root.pollStartedAt > root.pollStuckMs) {
+        // Let go of it. The next tick finds nothing running and starts fresh.
+        pollProc.running = false
+      }
+    }
   }
 
   // --- cursor, only while something is actually waiting on you ----------

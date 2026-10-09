@@ -1,9 +1,13 @@
 import json
+import pathlib
+import shutil
+import subprocess
+import warnings
 
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
-from conftest import run_hook, run_poll
+from conftest import HOOKS, ROOT, run_hook, run_poll
 
 scenarios("features/agent-sessions.feature")
 
@@ -160,7 +164,10 @@ def hook_runs_buried(ctx, runtime_dir, state):
 
 
 @when("the poller runs")
-def poller_runs(ctx):
+def poller_runs(ctx, runtime_dir):
+    # runtime_dir is not read here, but requesting it is what redirects
+    # XDG_RUNTIME_DIR. Without it a scenario with no Given of its own would
+    # point the poller at the real one -- which deletes what it finds stale.
     result = run_poll()
     assert result.returncode == 0, result.stderr
     ctx["poll"] = [line.split("\t") for line in result.stdout.splitlines()]
@@ -210,6 +217,74 @@ def poller_reports_agent(ctx, sid, agent):
 @then("the poller lists nothing")
 def poller_lists_nothing(ctx):
     assert ctx["poll"] == []
+
+
+@given("the hook scripts that ship with the plugin")
+def the_hook_scripts(ctx):
+    ctx["scripts"] = sorted(pathlib.Path(HOOKS).glob("*.sh"))
+    assert ctx["scripts"], "no hook scripts found"
+
+
+@then("each one is valid bash")
+def each_script_parses(ctx):
+    broken = []
+    for script in ctx["scripts"]:
+        result = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
+        if result.returncode != 0:
+            broken.append(f"{script.name}: {result.stderr.strip().splitlines()[-1]}")
+    assert not broken, broken
+
+
+@given("the QML files this plugin ships")
+def the_qml_files(ctx):
+    ctx["qml"] = sorted(pathlib.Path(ROOT).glob("*.qml"))
+    assert ctx["qml"], "no QML files found"
+
+
+@then("qmllint reports nothing against them")
+def qmllint_is_quiet(ctx):
+    if not shutil.which("qmllint"):
+        pytest.skip("qmllint not installed")
+    complaints, unanalysed = [], []
+    for qml in ctx["qml"]:
+        result = subprocess.run(["qmllint", str(qml)], capture_output=True, text=True)
+        said = (result.stdout + result.stderr).strip()
+        if said:
+            complaints.append(f"{qml.name}: {said[:200]}")
+        elif result.returncode != 0:
+            # Exit code but not a word about why: qmllint gave up rather than
+            # judged the file. Popup.qml has done this since the first commit
+            # -- around its typed JS functions, as far as bisecting shows --
+            # and treating a crashed tool as a verdict would be a lie in
+            # either direction, so it is reported and not counted.
+            unanalysed.append(f"{qml.name} (exit {result.returncode})")
+    if unanalysed:
+        warnings.warn(f"qmllint could not analyse: {', '.join(unanalysed)}")
+    assert not complaints, complaints
+
+
+@given("the files this plugin ships")
+def the_plugin_files(ctx):
+    listed = subprocess.run(["git", "-C", ROOT, "ls-files"],
+                            capture_output=True, text=True, check=True)
+    ctx["files"] = [pathlib.Path(ROOT) / name for name in listed.stdout.split("\n") if name]
+    assert ctx["files"], "git listed no files"
+
+
+@then("none of them carries an unresolved merge marker")
+def no_merge_markers(ctx):
+    # Assembled at runtime so this file does not contain what it searches for.
+    opening, closing = "<" * 7, ">" * 7
+    found = []
+    for path in ctx["files"]:
+        try:
+            text = path.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            if line.startswith(opening) or line.startswith(closing):
+                found.append(f"{path.name}:{number}")
+    assert not found, found
 
 
 def _write_state(runtime_dir, sid, state, cwd, pid, agent=None):

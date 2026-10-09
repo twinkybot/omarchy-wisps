@@ -30,7 +30,7 @@ def fake_binaries(tmp_path):
     """Start sleeping processes whose executable is named like an agent."""
     started = []
 
-    def start(name, hook=None, link=None):
+    def start(name, hook=None, link=None, via_shell=False):
         exe = tmp_path / "bin" / name
         exe.parent.mkdir(exist_ok=True)
         if not exe.exists():
@@ -46,7 +46,12 @@ def fake_binaries(tmp_path):
         script = "sleep 60; :"
         if hook:
             state, payload = hook
-            script = f"printf '%s' {shlex.quote(payload)} | {shlex.quote(HOOKS + '/wisps-state.sh')} {state}; sleep 60; :"
+            run = f"printf '%s' {shlex.quote(payload)} | {shlex.quote(HOOKS + '/wisps-state.sh')} {state}"
+            if via_shell:
+                # Like dash: a child shell that stays the hook's parent and
+                # exits right after, instead of exec-ing into the script.
+                run = f"bash -c {shlex.quote(run + '; :')}"
+            script = f"{run}; sleep 60; :"
         proc = subprocess.Popen([str(exe), "-c", script])
         started.append(proc)
         return proc

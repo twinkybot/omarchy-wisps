@@ -181,32 +181,35 @@ field cwd; cwd="$(sanitize "$_f")"
 # without a liveness handle the state file, and its wisp, would linger for
 # hours after the session died. Rewritten on every event, so it self-heals.
 #
-# The hook's own parent is the agent under claude, but not always elsewhere --
-# grok runs hooks below a node supervisor -- so walk up the tree for the first
-# ancestor we recognise rather than assuming $PPID. Falling back to $PPID and
-# "claude" keeps the old behaviour when the walk finds nothing.
+# That pid is usually the hook's own parent, but not always: agents run hooks
+# through /bin/sh, and where that is dash (Debian, Ubuntu) the shell does not
+# exec into the script, so $PPID is a throwaway shell that is gone a moment
+# later -- and the poller would drop the wisp on its next tick. grok goes
+# further and runs hooks below a node supervisor. So climb the ancestry to the
+# first process that is an agent by name (comm) or binary (exe), on a short
+# leash, and fall back to $PPID and "claude" when nothing matches.
+#
+# comm alone is not enough: Copilot CLI names its main thread "MainThread", so
+# only exe says "copilot", while Claude's native install runs a binary named
+# after its version, so only comm says "claude". wisps-poll.sh checks the same
+# two in the same order. Kept fork-free apart from the readlink, since this
+# runs on every tool call.
 owner="$PPID"
 agent="claude"
-pid="$PPID"
+p="$PPID"
 for _ in 1 2 3 4 5 6; do
-  [ -n "$pid" ] && [ "$pid" != "0" ] && [ "$pid" != "1" ] || break
-  comm="$(cat "/proc/$pid/comm" 2>/dev/null)" || break
-  # comm alone is not enough: Copilot CLI names its main thread "MainThread",
-  # so only /proc/<pid>/exe says "copilot". wisps-poll.sh checks the same two
-  # in the same order, so whatever is recorded here is what it looks for.
-  exe="$(readlink "/proc/$pid/exe" 2>/dev/null)"; exe="${exe% (deleted)}"
+  comm=""; read -r comm < "/proc/$p/comm" 2>/dev/null || break
+  exe="$(readlink "/proc/$p/exe" 2>/dev/null)"; exe="${exe% (deleted)}"
   case "$comm" in
-    claude|grok|copilot) owner="$pid"; agent="$comm"; break ;;
+    claude|grok|copilot) owner="$p"; agent="$comm"; break ;;
+    *) case "${exe##*/}" in
+         claude|grok|copilot) owner="$p"; agent="${exe##*/}"; break ;;
+       esac ;;
   esac
-  case "${exe##*/}" in
-    claude|grok|copilot) owner="$pid"; agent="${exe##*/}"; break ;;
-  esac
-  # Field 4 of /proc/<pid>/stat is the parent pid. The command name in field 2
-  # can itself contain spaces and parentheses, so cut everything up to the
-  # last ')' before splitting.
-  stat_line="$(cat "/proc/$pid/stat" 2>/dev/null)" || break
-  pid="$(printf '%s' "${stat_line##*) }" | cut -d' ' -f2)"
-  case "$pid" in ''|*[!0-9]*) break ;; esac
+  pp=""
+  while read -r k v; do [ "$k" = "PPid:" ] && { pp="$v"; break; }; done < "/proc/$p/status" 2>/dev/null
+  case "$pp" in ''|*[!0-9]*|0|1) break ;; esac
+  p="$pp"
 done
 
 # If the walk found nothing and grok is clearly the caller, take grok at its

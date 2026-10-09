@@ -49,6 +49,13 @@ Feature: One wisp per coding-agent session
     When the poller runs
     Then the poller lists session "0b6bc27e-1111-4c5f-8888-000000000001"
 
+  Scenario: A hook launched through a throwaway shell still records the agent as owner
+    Given a wisp for session "0b6bc27e-1111-4c5f-8888-000000000001" owned by a running "claude" binary
+    And a Claude Code payload for session "0b6bc27e-1111-4c5f-8888-000000000001" in "/home/me/proj"
+    And the "working" hook runs inside that binary through a throwaway shell
+    When the poller runs
+    Then the poller lists session "0b6bc27e-1111-4c5f-8888-000000000001"
+
   Scenario: The poller keeps a wisp whose owner is a live copilot binary
     Given a wisp for session "b931152f-5afd-4d06-8f3c-0a3d8fb29b1d" owned by a running "copilot" binary
     When the poller runs

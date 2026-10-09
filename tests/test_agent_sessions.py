@@ -84,11 +84,16 @@ def wisp_owned_by_exited(runtime_dir, fake_binaries, sid, name):
     _write_state(runtime_dir, sid, "working", "/home/me/proj", proc.pid)
 
 
+@given(parsers.parse('the "{state}" hook runs inside that binary through a throwaway shell'))
+def hook_runs_inside_owner_via_shell(ctx, runtime_dir, fake_binaries, state):
+    hook_runs_inside_owner(ctx, runtime_dir, fake_binaries, state, via_shell=True)
+
+
 @given(parsers.parse('the "{state}" hook runs inside that binary'))
-def hook_runs_inside_owner(ctx, runtime_dir, fake_binaries, state):
+def hook_runs_inside_owner(ctx, runtime_dir, fake_binaries, state, via_shell=False):
     import time
-    sid = ctx["payload"]["sessionId"]
-    fake_binaries(ctx["owner"], hook=(state, json.dumps(ctx["payload"])))
+    sid = ctx["payload"].get("sessionId") or ctx["payload"]["session_id"]
+    fake_binaries(ctx["owner"], hook=(state, json.dumps(ctx["payload"])), via_shell=via_shell)
     for _ in range(50):
         f = runtime_dir / f"{sid}.state"
         if f.exists() and f.read_text().startswith(state):
